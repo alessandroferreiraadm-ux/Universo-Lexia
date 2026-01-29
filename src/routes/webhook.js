@@ -2,20 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { getAIResponse } = require('../services/openaiService');
 const { sendMessage, addNoteToLead } = require('../services/kommoService');
-const fs = require('fs');
-const path = require('path');
 
-/**
- * Salva o payload do webhook em arquivo para análise
- */
-function logWebhookPayload(payload) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const logDir = path.join(__dirname, '../../logs');
-    const logFile = path.join(logDir, `webhook_${timestamp}.json`);
-    
-    fs.writeFileSync(logFile, JSON.stringify(payload, null, 2));
-    console.log(`📄 Payload salvo em: ${logFile}`);
-}
+// Variável global temporária para capturar payloads (Fase 2)
+let lastPayloads = [];
 
 /**
  * Webhook principal para receber mensagens do Kommo
@@ -33,9 +22,6 @@ router.post('/kommo', async (req, res) => {
         console.log('Body:', JSON.stringify(payload, null, 2));
         console.log('='.repeat(80) + '\n');
 
-        // Salvar payload para análise
-        logWebhookPayload(payload);
-
         // Responder imediatamente ao Kommo (evitar timeout)
         res.status(200).json({ status: 'received' });
 
@@ -48,6 +34,33 @@ router.post('/kommo', async (req, res) => {
         console.error('❌ [WEBHOOK] Erro ao receber webhook:', error);
         res.status(500).json({ status: 'error', message: error.message });
     }
+});
+
+/**
+ * Endpoint para capturar e visualizar o payload real do Kommo (Fase 2)
+ * POST /webhook/capture
+ */
+router.post('/capture', (req, res) => {
+    const payload = req.body;
+    console.log('📸 [CAPTURE] Payload capturado:', JSON.stringify(payload, null, 2));
+    
+    lastPayloads.unshift({
+        timestamp: new Date().toISOString(),
+        payload: payload
+    });
+    
+    // Manter apenas os últimos 10
+    if (lastPayloads.length > 10) lastPayloads.pop();
+    
+    res.status(200).json({ status: 'captured' });
+});
+
+/**
+ * Endpoint para visualizar os payloads capturados
+ * GET /webhook/capture
+ */
+router.get('/capture', (req, res) => {
+    res.json(lastPayloads);
 });
 
 /**
@@ -164,6 +177,7 @@ router.get('/test', (req, res) => {
         timestamp: new Date().toISOString(),
         endpoints: {
             webhook: 'POST /webhook/kommo',
+            capture: 'POST/GET /webhook/capture',
             test: 'GET /webhook/test'
         }
     });
