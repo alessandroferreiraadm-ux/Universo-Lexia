@@ -76,17 +76,19 @@ async function processWebhook(payload) {
             return;
         }
 
-        const { leadId, chatId, messageText, senderType } = messageData;
+        const { leadId, chatId, messageText, senderType, type } = messageData;
 
         console.log(`📋 [WEBHOOK] Dados extraídos:`, {
             leadId,
             chatId,
             messageText: messageText?.substring(0, 50),
-            senderType
+            senderType,
+            type
         });
 
-        // Ignorar mensagens enviadas pelo bot (evitar loop)
-        if (senderType === 'bot' || senderType === 'manager') {
+        // Ignorar mensagens enviadas pelo bot ou gerente (evitar loop)
+        // No formato real, mensagens do cliente vêm como 'incoming'
+        if (type === 'outgoing' || senderType === 'bot' || senderType === 'manager') {
             console.log('⏭️ [WEBHOOK] Mensagem ignorada (enviada pelo bot ou gerente)');
             return;
         }
@@ -98,11 +100,11 @@ async function processWebhook(payload) {
         }
 
         // 1. Obter resposta da IA
-        console.log(`🤖 [WEBHOOK] Solicitando resposta da IA...`);
+        console.log(`🤖 [WEBHOOK] Solicitando resposta da IA para: "${messageText}"`);
         const aiResponse = await getAIResponse(messageText, leadId);
 
         // 2. Enviar resposta de volta ao cliente via Kommo
-        console.log(`📤 [WEBHOOK] Enviando resposta ao cliente...`);
+        console.log(`📤 [WEBHOOK] Enviando resposta ao cliente no chat ${chatId}...`);
         await sendMessage(chatId, aiResponse);
 
         // 3. Adicionar nota ao lead (opcional - para auditoria)
@@ -127,34 +129,37 @@ async function processWebhook(payload) {
  */
 function extractMessageData(payload) {
     try {
-        // Formato 1: Evento de mensagem direta
+        // Formato Real Capturado (Mensagem de WhatsApp via WABA)
+        if (payload.message && payload.message.add && Array.isArray(payload.message.add)) {
+            const msg = payload.message.add[0];
+            return {
+                leadId: msg.entity_id || msg.element_id,
+                chatId: msg.talk_id || msg.chat_id,
+                messageText: msg.text,
+                senderType: msg.author?.type || 'client',
+                type: msg.type // 'incoming' ou 'outgoing'
+            };
+        }
+
+        // Fallback Formato 1: Evento de mensagem direta
         if (payload.message) {
             return {
                 leadId: payload.lead_id || payload.message.lead_id,
                 chatId: payload.message.talk_id || payload.talk_id,
                 messageText: payload.message.text,
-                senderType: payload.message.sender?.type || 'client'
+                senderType: payload.message.sender?.type || 'client',
+                type: payload.message.type || 'incoming'
             };
         }
 
-        // Formato 2: Evento de talk (conversa)
+        // Fallback Formato 2: Evento de talk (conversa)
         if (payload.talk && payload.talk.message) {
             return {
                 leadId: payload.talk.lead_id,
                 chatId: payload.talk.id,
                 messageText: payload.talk.message.text,
-                senderType: payload.talk.message.sender?.type || 'client'
-            };
-        }
-
-        // Formato 3: Evento de leads (menos comum para mensagens)
-        if (payload.leads && payload.leads.add) {
-            const lead = payload.leads.add[0];
-            return {
-                leadId: lead.id,
-                chatId: null,
-                messageText: lead.name || 'Novo lead criado',
-                senderType: 'system'
+                senderType: payload.talk.message.sender?.type || 'client',
+                type: payload.talk.message.type || 'incoming'
             };
         }
 
